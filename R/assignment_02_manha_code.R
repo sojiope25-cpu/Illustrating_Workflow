@@ -76,3 +76,81 @@ t_spiralis |>
 t_britovi |>
   ggplot(aes(matching_class, y = perc_div)) + geom_boxplot() + geom_hline(aes(
     yintercept = britovi_results$lower_limit, colour = "Lower Limit")) + geom_hline(aes( yintercept = britovi_results$upper_limit, colour = "Upper Limit" )) + scale_color_manual(name = "Outlier Thresholds", values = c("Lower Limit" = "red", "Upper Limit" = "blue") ) + guides(x = guide_axis(angle = 45)) + labs(title = "Outlier Detection by TE Matching Class - *T. britovi*", x = "TE Matching Class", y = "Percent Divergence" ) + theme(plot.title = element_markdown())
+
+# 03 REVISED: Run Wilcoxon rank-sum tests on outlier-removed data to compare % divergence within matching classes ----
+
+# Combine outlier-removed species datasets and apply standard TE/value filters
+te_combined <- bind_rows(
+  t_spiralis_out_removed |> mutate(species = "spiralis"),
+  t_britovi_out_removed  |> mutate(species = "britovi")
+) |>
+  filter(
+    !matching_class %in% ls_non_te,
+    !is.na(matching_class),
+    is.finite(perc_div)
+  )
+
+wilcox_results <- te_combined |>
+  group_by(matching_class) |>
+  group_modify(~ {
+    x <- .x$perc_div[.x$species == "spiralis"]
+    y <- .x$perc_div[.x$species == "britovi"]
+    
+    # Skip classes with fewer than two observations in either species
+    # or where every value is identical
+    can_test <- length(x) >= 2 &&
+      length(y) >= 2 &&
+      n_distinct(c(x, y)) > 1
+    
+    tibble(
+      n_spiralis = length(x),
+      n_britovi = length(y),
+      median_spiralis = if (length(x) > 0) median(x) else NA_real_,
+      median_britovi = if (length(y) > 0) median(y) else NA_real_,
+      p_value = if (can_test) {
+        wilcox.test(
+          x, y,
+          alternative = "two.sided",
+          paired = FALSE,
+          exact = FALSE
+        )$p.value
+      } else NA_real_
+    )
+  }) |>
+  ungroup() |>
+  mutate(
+    p_adjusted = p.adjust(p_value, method = "BH"),
+    significant = p_adjusted < 0.05
+  ) |>
+  arrange(p_adjusted)
+
+print(wilcox_results, n = Inf)
+
+# 04 REVISED Plot average percent divergence within matching_class between t_spiralis & t_britovi using boxplots ----
+
+#  find distribution of %div of classes in britovi
+shared_classes <- intersect(
+  t_spiralis_out_removed$matching_class,
+  t_britovi_out_removed$matching_class
+)
+
+te_shared <- bind_rows(
+  t_britovi_out_removed |> select(matching_class, perc_div) |> mutate(species = "T. britovi"),
+  t_spiralis_out_removed |> select(matching_class, perc_div) |> mutate(species = "T. spiralis")
+) |> 
+  filter(matching_class %in% shared_classes)
+
+te_shared |> filter(species == "T. britovi") |>
+  ggplot(aes(x = perc_div, y = matching_class)) + geom_boxplot()
+
+te_shared |> filter(species == "T. spiralis") |>
+  ggplot(aes(x = perc_div, y = matching_class)) + geom_boxplot()
+
+# combine datasets to make combined graph
+ggplot(data = te_shared, mapping = aes(x = perc_div, y = matching_class, fill = species)) +
+  geom_boxplot() +
+  labs(
+    title = "% Divergence in Shared TE Classes of T. britovi and T. spiralis",
+    x = "% Divergence",
+    y = "TE Class")
+
