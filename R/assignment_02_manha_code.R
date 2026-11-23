@@ -153,4 +153,90 @@ ggplot(data = te_shared, mapping = aes(x = perc_div, y = matching_class, fill = 
     title = "% Divergence in Shared TE Classes of T. britovi and T. spiralis",
     x = "% Divergence",
     y = "TE Class")
+# 05 REVISED: Sensitivity analysis: compare Wilcoxon results with and without outliers ----
+# Combine original datasets (including outliers)
+te_combined_raw <- bind_rows(
+  t_spiralis |> mutate(species = "spiralis"),
+  t_britovi  |> mutate(species = "britovi")
+) |>
+  filter(
+    !matching_class %in% ls_non_te,
+    !is.na(matching_class),
+    is.finite(perc_div))
 
+# Perform Wilcoxon tests using original data
+wilcox_results_raw <- te_combined_raw |>
+  group_by(matching_class) |>
+  group_modify(~ {
+    x <- .x$perc_div[.x$species == "spiralis"]
+    y <- .x$perc_div[.x$species == "britovi"]
+    
+    # Check whether the Wilcoxon test can be performed
+    can_test <- length(x) >= 2 &&
+      length(y) >= 2 &&
+      n_distinct(c(x, y)) > 1
+    tibble(
+      n_spiralis_raw = length(x),
+      n_britovi_raw = length(y),
+      median_spiralis_raw = if (length(x) > 0) median(x) else NA_real_,
+      median_britovi_raw = if (length(y) > 0) median(y) else NA_real_,
+      p_value_raw = if (can_test) {
+        wilcox.test(
+          x, y,
+          alternative = "two.sided",
+          paired = FALSE,
+          exact = FALSE
+        )$p.value
+      } else NA_real_
+    )
+  }) |>
+  ungroup() |>
+  mutate(
+    p_adjusted_raw = p.adjust(p_value_raw, method = "BH"),
+    significant_raw = if_else(
+      is.na(p_adjusted_raw),
+      NA,
+      p_adjusted_raw < 0.05))
+
+# Compare original and outlier-removed results
+wilcox_comparison <- wilcox_results |>
+  select(
+    matching_class,
+    n_spiralis_clean = n_spiralis,
+    n_britovi_clean = n_britovi,
+    median_spiralis_clean = median_spiralis,
+    median_britovi_clean = median_britovi,
+    p_value_clean = p_value,
+    p_adjusted_clean = p_adjusted
+  ) |>
+  mutate(
+    significant_clean = if_else(
+      is.na(p_adjusted_clean),
+      NA,
+      p_adjusted_clean < 0.05
+    )
+  ) |>
+  full_join(
+    wilcox_results_raw |>
+      select(
+        matching_class,
+        n_spiralis_raw,
+        n_britovi_raw,
+        median_spiralis_raw,
+        median_britovi_raw,
+        p_value_raw,
+        p_adjusted_raw,
+        significant_raw
+      ),
+    by = "matching_class"
+  ) |>
+  mutate(
+    significance_changed = if_else(
+      !is.na(significant_clean) & !is.na(significant_raw),
+      significant_clean != significant_raw,
+      NA
+    )
+  )
+
+# Display comparison table
+print(wilcox_comparison, n = Inf, width = Inf)
