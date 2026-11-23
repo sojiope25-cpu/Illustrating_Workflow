@@ -3,7 +3,7 @@
 
 library(tidyverse)
 library(viridis)
-library(ggtext)
+library(ggtext) 
 library(ggplot2)
 
 t_spiralis <- read_csv("../data/GCA_001447595.1.csv")
@@ -21,31 +21,57 @@ t_britovi <- t_britovi |> mutate(row = 1:n()) |> filter(matching_class %notin% l
 dim(t_britovi) #1177
 
 
-# 02 Identify, Plot, and Remove Outliers (using interquartile range method) ----
-Q1_spiralis <- quantile(t_spiralis$perc_div, .25)
-Q3_spiralis <- quantile(t_spiralis$perc_div, .75)
-IQR_spiralis <- IQR(t_spiralis$perc_div)
-outliers_spiralis <- subset(t_spiralis, t_spiralis$perc_div<(Q1_spiralis - 1.5*IQR_spiralis) | t_spiralis$perc_div>(Q3_spiralis + 1.5*IQR_spiralis))
+# 02 Identify, Plot, and Remove Outliers (using interquartile range method) 
+# Function to identify outliers and remove them
+
+identify_outliers <- function(data) {
+  Q1 <- quantile(data$perc_div, 0.25, na.rm = TRUE)
+  Q3 <- quantile(data$perc_div, 0.75, na.rm = TRUE)
+  IQR_value <- IQR(data$perc_div, na.rm = TRUE)
+  
+  lower_limit <- Q1 - 1.5 * IQR_value
+  upper_limit <- Q3 + 1.5 * IQR_value
+  
+  # Identify outliers
+  outliers <- subset(data,perc_div < lower_limit | perc_div > upper_limit)
+  # Remove outliers from dataset
+  cleaned_data <- data |> 
+    filter(!row %in% outliers$row)
+  # Return results
+  list(
+    outliers = outliers,
+    cleaned_data = cleaned_data,
+    lower_limit = lower_limit,
+    upper_limit = upper_limit
+  )
+}
+# Apply function to both species
+spiralis_results <- identify_outliers(t_spiralis)
+britovi_results <- identify_outliers(t_britovi)
+
+# Extract outliers and cleaned datasets
+outliers_spiralis <- spiralis_results$outliers
+outliers_britovi <- britovi_results$outliers
+
+t_spiralis_out_removed <- spiralis_results$cleaned_data
+t_britovi_out_removed <- britovi_results$cleaned_data
+
+# Check number of outliers
 dim(outliers_spiralis) #7
-
-t_spiralis |> ggplot(aes(matching_class,y = perc_div)) + geom_boxplot() + geom_hline(aes(yintercept = Q1_spiralis - 1.5*IQR_spiralis, color = "Q1")) + geom_hline(aes(yintercept = Q3_spiralis + 1.5*IQR_spiralis,  colour = "Q3")) + scale_color_manual(name = "Outlier Thresholds", values = c("red", "blue")) + guides(x = guide_axis(angle = 45)) + labs(title = "Outlier Detection by TE Matching Class - *T. spiralis*", x = "TE Matching Class", y = "Percent Divergence") + theme(plot.title = element_markdown())
-
-Q1_britovi <- quantile(t_britovi$perc_div, .25)
-Q3_britovi <- quantile(t_britovi$perc_div, .75)
-IQR_britovi <- IQR(t_britovi$perc_div)
-outliers_britovi <- subset(t_britovi, t_britovi$perc_div<(Q1_britovi - 1.5*IQR_britovi) | t_britovi$perc_div>(Q3_britovi + 1.5*IQR_britovi)) 
 dim(outliers_britovi) #1
 
-t_britovi |> ggplot(aes(matching_class,y = perc_div)) + geom_boxplot() + geom_hline(aes(yintercept = Q1_britovi - 1.5*IQR_britovi, color = "Q1")) + geom_hline(aes(yintercept = Q3_britovi + 1.5*IQR_britovi,  colour = "Q3" )) + scale_color_manual(name = "Outlier Threshold", values = c("red", "blue"))+ guides(x = guide_axis(angle = 45)) + labs(title = "Outlier Detection by TE Matching Class - *T. britovi*", x = "TE Matching Class", y = "Percent Divergence") + theme(plot.title = element_markdown())
-
-#Remove outliers from dataset
-t_spiralis_out_removed <- t_spiralis |> filter(row %notin% outliers_spiralis$row)
-
+# Check cleaned dataset dimensions
 dim(t_spiralis_out_removed) #1030
 
-t_britovi_out_removed <- t_britovi |> filter(row %notin% outliers_britovi$row)
 dim(t_britovi_out_removed) #1176
-  
+# Plot outlier detection for T. spiralis
+t_spiralis |>
+  ggplot(aes(matching_class, y = perc_div)) +geom_boxplot() + geom_hline(aes(yintercept = spiralis_results$lower_limit,colour = "Lower Limit")) + geom_hline(aes(yintercept = spiralis_results$upper_limit,colour = "Upper Limit")) + scale_color_manual( name = "Outlier Thresholds", values = c("Lower Limit" = "red", "Upper Limit" = "blue")) +guides(x = guide_axis(angle = 45)) +labs( title = "Outlier Detection by TE Matching Class - *T. spiralis*", x = "TE Matching Class",y = "Percent Divergence") +theme(plot.title = element_markdown())
+
+# Plot outlier detection for T. britovi
+t_britovi |>
+  ggplot(aes(matching_class, y = perc_div)) + geom_boxplot() + geom_hline(aes(
+    yintercept = britovi_results$lower_limit, colour = "Lower Limit")) + geom_hline(aes( yintercept = britovi_results$upper_limit, colour = "Upper Limit" )) + scale_color_manual(name = "Outlier Thresholds", values = c("Lower Limit" = "red", "Upper Limit" = "blue") ) + guides(x = guide_axis(angle = 45)) + labs(title = "Outlier Detection by TE Matching Class - *T. britovi*", x = "TE Matching Class", y = "Percent Divergence" ) + theme(plot.title = element_markdown())
 
 # 03 Perform Wilcoxon tests: percent divergence between species, within each TA mathcing_class ----
 
